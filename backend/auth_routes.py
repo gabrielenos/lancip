@@ -41,6 +41,15 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
   )
 
 
+@router.get("/users/search", response_model=list[PublicUser])
+def search_users(q: str, db: Session = Depends(get_db)):
+  """Cari user berdasarkan nama (username) yang mengandung q (case-insensitive)."""
+  stmt = select(User).where(User.name.ilike(f"%{q}%"))
+  users = db.execute(stmt).scalars().all()
+
+  return [PublicUser(id=u.id, name=u.name, email=u.email) for u in users]
+
+
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
   user = db.execute(select(User).where(User.email == payload.email)).scalar_one_or_none()
