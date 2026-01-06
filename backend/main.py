@@ -1,5 +1,8 @@
+from typing import List
+
 from fastapi import Depends
 from fastapi import FastAPI
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -21,6 +24,30 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+
+
+class ConnectionManager:
+  def __init__(self) -> None:
+    self.active_connections: List[WebSocket] = []
+
+  async def connect(self, websocket: WebSocket) -> None:
+    await websocket.accept()
+    self.active_connections.append(websocket)
+
+  def disconnect(self, websocket: WebSocket) -> None:
+    if websocket in self.active_connections:
+      self.active_connections.remove(websocket)
+
+  async def broadcast(self, message: str) -> None:
+    for connection in list(self.active_connections):
+      try:
+        await connection.send_text(message)
+      except Exception:
+        # Jika gagal kirim ke satu koneksi, putuskan saja koneksi itu
+        self.disconnect(connection)
+
+
+manager = ConnectionManager()
 
 
 @app.on_event("startup")
@@ -48,3 +75,16 @@ def get_stats():
     "activity": 1200,
     "satisfaction": 98,
   }
+
+
+@app.websocket("/ws/chat")
+async def chat_websocket(websocket: WebSocket):
+  await manager.connect(websocket)
+  try:
+    while True:
+      data = await websocket.receive_text()
+      # Data dikirim apa adanya ke semua client (termasuk pengirim)
+      await manager.broadcast(data)
+  except WebSocketDisconnect:
+    manager.disconnect(websocket)
+
