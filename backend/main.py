@@ -2,11 +2,11 @@ from typing import Dict, List
 
 import json
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from fastapi import FastAPI
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.orm import Session
 
 from . import models
@@ -14,6 +14,8 @@ from .auth_routes import router as auth_router
 from .database import Base
 from .database import engine
 from .database import get_db
+from .models import User, Contact
+from .schemas import ContactCreate, ContactOut, PublicUser
 
 app = FastAPI()
 
@@ -89,6 +91,71 @@ def get_stats():
     "activity": 1200,
     "satisfaction": 98,
   }
+
+
+@app.get("/contacts", response_model=list[ContactOut])
+def list_contacts(owner_id: int, db: Session = Depends(get_db)):
+  stmt = (
+    select(Contact, User)
+    .join(User, User.id == Contact.contact_id)
+    .where(Contact.owner_id == owner_id)
+  )
+  rows = db.execute(stmt).all()
+
+  result: list[ContactOut] = []
+  for contact_row, user_row in rows:
+    result.append(
+      ContactOut(
+        id=contact_row.id,
+        owner_id=contact_row.owner_id,
+        contact=PublicUser(
+          id=user_row.id,
+          name=user_row.name,
+          email=user_row.email,
+        ),
+      )
+    )
+  return result
+
+
+@app.post("/contacts", response_model=ContactOut)
+def add_contact(payload: ContactCreate, db: Session = Depends(get_db)):
+  owner = db.get(User, payload.owner_id)
+  contact_user = db.get(User, payload.contact_id)
+  if owner is None or contact_user is None:
+    raise HTTPException(status_code=400, detail="Owner atau contact tidak ditemukan")
+
+  existing = db.execute(
+    select(Contact).where(
+      Contact.owner_id == payload.owner_id,
+      Contact.contact_id == payload.contact_id,
+    )
+  ).scalar_one_or_none()
+  if existing:
+    return ContactOut(
+      id=existing.id,
+      owner_id=existing.owner_id,
+      contact=PublicUser(
+        id=contact_user.id,
+        name=contact_user.name,
+        email=contact_user.email,
+      ),
+    )
+
+  new_contact = Contact(owner_id=payload.owner_id, contact_id=payload.contact_id)
+  db.add(new_contact)
+  db.commit()
+  db.refresh(new_contact)
+
+  return ContactOut(
+    id=new_contact.id,
+    owner_id=new_contact.owner_id,
+    contact=PublicUser(
+      id=contact_user.id,
+      name=contact_user.name,
+      email=contact_user.email,
+    ),
+  )
 
 
 @app.websocket("/ws/chat")

@@ -22,3 +22,14 @@ class AuthResponse(BaseModel):
   ok: bool
   user: PublicUser
   access_token: str
+
+
+class ContactCreate(BaseModel):
+  owner_id: int
+  contact_id: int
+
+
+class ContactOut(BaseModel):
+  id: int
+  owner_id: int
+  contact: PublicUser
