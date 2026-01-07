@@ -1,4 +1,6 @@
-from typing import List
+from typing import Dict, List
+
+import json
 
 from fastapi import Depends
 from fastapi import FastAPI
@@ -27,24 +29,36 @@ app.include_router(auth_router)
 
 
 class ConnectionManager:
+  """Mengelola koneksi WebSocket per-user.
+
+  Setiap userId bisa punya beberapa koneksi (beberapa tab/browser) sekaligus.
+  Pesan bisa diarahkan hanya ke pengirim dan penerima (private).
+  """
+
   def __init__(self) -> None:
-    self.active_connections: List[WebSocket] = []
+    self.connections: Dict[int, List[WebSocket]] = {}
 
-  async def connect(self, websocket: WebSocket) -> None:
+  async def connect(self, user_id: int, websocket: WebSocket) -> None:
     await websocket.accept()
-    self.active_connections.append(websocket)
+    self.connections.setdefault(user_id, []).append(websocket)
 
-  def disconnect(self, websocket: WebSocket) -> None:
-    if websocket in self.active_connections:
-      self.active_connections.remove(websocket)
+  def disconnect(self, user_id: int, websocket: WebSocket) -> None:
+    conns = self.connections.get(user_id)
+    if not conns:
+      return
+    if websocket in conns:
+      conns.remove(websocket)
+    if not conns:
+      self.connections.pop(user_id, None)
 
-  async def broadcast(self, message: str) -> None:
-    for connection in list(self.active_connections):
+  async def send_to_user(self, user_id: int, message: str) -> None:
+    conns = list(self.connections.get(user_id, []))
+    for ws in conns:
       try:
-        await connection.send_text(message)
+        await ws.send_text(message)
       except Exception:
         # Jika gagal kirim ke satu koneksi, putuskan saja koneksi itu
-        self.disconnect(connection)
+        self.disconnect(user_id, ws)
 
 
 manager = ConnectionManager()
@@ -78,13 +92,37 @@ def get_stats():
 
 
 @app.websocket("/ws/chat")
-async def chat_websocket(websocket: WebSocket):
-  await manager.connect(websocket)
+async def chat_websocket(websocket: WebSocket, userId: int):
+  """WebSocket per-user.
+
+  Setiap koneksi terikat ke satu userId. Pesan yang diterima di sini
+  diharapkan berupa JSON yang memuat senderId dan targetId, dan
+  hanya akan diteruskan ke kedua user tersebut.
+  """
+
+  user_id = userId
+  await manager.connect(user_id, websocket)
   try:
     while True:
-      data = await websocket.receive_text()
-      # Data dikirim apa adanya ke semua client (termasuk pengirim)
-      await manager.broadcast(data)
+      raw = await websocket.receive_text()
+      try:
+        payload = json.loads(raw)
+      except json.JSONDecodeError:
+        # Jika bukan JSON yang valid, abaikan saja
+        continue
+
+      sender_id = payload.get("senderId")
+      target_id = payload.get("targetId")
+
+      if not isinstance(sender_id, int) or not isinstance(target_id, int):
+        # Pesan tidak punya informasi routing yang jelas
+        continue
+
+      # Teruskan pesan ke pengirim (untuk echo) dan penerima
+      await manager.send_to_user(sender_id, raw)
+      if target_id != sender_id:
+        await manager.send_to_user(target_id, raw)
+
   except WebSocketDisconnect:
-    manager.disconnect(websocket)
+    manager.disconnect(user_id, websocket)
 
