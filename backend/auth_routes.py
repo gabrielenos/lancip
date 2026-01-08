@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .auth import hash_password
@@ -13,6 +13,7 @@ from .schemas import AuthResponse
 from .schemas import LoginRequest
 from .schemas import PublicUser
 from .schemas import RegisterRequest
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,7 +37,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
   return AuthResponse(
     ok=True,
-    user=PublicUser(id=user.id, name=user.name, email=user.email),
+    user=PublicUser(id=user.id, name=user.name, email=user.email, avatar_url=user.avatar_url),
     access_token=token,
   )
 
@@ -47,7 +48,7 @@ def search_users(q: str, db: Session = Depends(get_db)):
   stmt = select(User).where(User.name.ilike(f"%{q}%"))
   users = db.execute(stmt).scalars().all()
 
-  return [PublicUser(id=u.id, name=u.name, email=u.email) for u in users]
+  return [PublicUser(id=u.id, name=u.name, email=u.email, avatar_url=u.avatar_url) for u in users]
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -63,6 +64,31 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
   return AuthResponse(
     ok=True,
-    user=PublicUser(id=user.id, name=user.name, email=user.email),
+    user=PublicUser(id=user.id, name=user.name, email=user.email, avatar_url=user.avatar_url),
     access_token=token,
   )
+
+
+class AvatarUpdate(BaseModel):
+  avatar_url: str
+
+
+@router.put("/users/{user_id}/avatar", response_model=PublicUser)
+def update_avatar(user_id: int, payload: AvatarUpdate, db: Session = Depends(get_db)):
+  # Pastikan user ada dulu
+  user = db.get(User, user_id)
+  if user is None:
+    raise HTTPException(status_code=404, detail="User tidak ditemukan")
+
+  # Lakukan UPDATE langsung ke database
+  stmt = (
+    update(User)
+    .where(User.id == user_id)
+    .values(avatar_url=payload.avatar_url)
+  )
+  db.execute(stmt)
+  db.commit()
+
+  # Ambil ulang user terbaru
+  refreshed = db.get(User, user_id)
+  return PublicUser(id=refreshed.id, name=refreshed.name, email=refreshed.email, avatar_url=refreshed.avatar_url)

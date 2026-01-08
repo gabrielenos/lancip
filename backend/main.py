@@ -112,6 +112,7 @@ def list_contacts(owner_id: int, db: Session = Depends(get_db)):
           id=user_row.id,
           name=user_row.name,
           email=user_row.email,
+          avatar_url=user_row.avatar_url,
         ),
       )
     )
@@ -139,6 +140,7 @@ def add_contact(payload: ContactCreate, db: Session = Depends(get_db)):
         id=contact_user.id,
         name=contact_user.name,
         email=contact_user.email,
+        avatar_url=contact_user.avatar_url,
       ),
     )
 
@@ -154,6 +156,7 @@ def add_contact(payload: ContactCreate, db: Session = Depends(get_db)):
       id=contact_user.id,
       name=contact_user.name,
       email=contact_user.email,
+      avatar_url=contact_user.avatar_url,
     ),
   )
 

@@ -11,6 +11,8 @@ class User(Base):
   email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
   name: Mapped[str] = mapped_column(String(255))
   password_hash: Mapped[str] = mapped_column(String(255))
+  # URL avatar user (nullable). Type hint tetap str untuk menghindari masalah Union.
+  avatar_url: Mapped[str] = mapped_column(String(2048), nullable=True)
 
 
 class Contact(Base):

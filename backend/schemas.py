@@ -16,6 +16,7 @@ class PublicUser(BaseModel):
   id: int
   name: str
   email: str
+  avatar_url: str | None = None
 
 
 class AuthResponse(BaseModel):
